@@ -6,7 +6,7 @@
       name="viewport"
       content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
     />
-    <title>Diário de Classe Digital</title>
+    <title>Diário Mobile Oficial</title>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
@@ -37,10 +37,11 @@
         display: flex;
         justify-content: space-around;
         background: var(--light);
-        padding: 15px;
+        padding: 10px;
         border-radius: 10px;
         margin-bottom: 15px;
         font-weight: bold;
+        border: 1px solid #ddd;
       }
       .tabs {
         display: flex;
@@ -50,7 +51,7 @@
         padding-bottom: 5px;
       }
       .tab-btn {
-        padding: 12px 18px;
+        padding: 10px 15px;
         border: none;
         background: #dcdde1;
         border-radius: 8px;
@@ -67,7 +68,7 @@
         border-collapse: collapse;
       }
       td {
-        padding: 15px 10px;
+        padding: 12px 10px;
         border-bottom: 1px solid #eee;
         font-size: 16px;
       }
@@ -104,20 +105,21 @@
         background: #8e44ad;
         display: none;
         grid-column: span 2;
-      } /* Escondido por padrão */
-      .loading {
+      }
+      #statusLoader {
         text-align: center;
         color: #8e44ad;
         font-weight: bold;
-        display: none;
         padding: 10px;
       }
     </style>
   </head>
   <body>
     <div class="container">
-      <h2 style="text-align: center; color: var(--primary)">Diário Mobile</h2>
-      <div id="statusLoader" class="loading">Sincronizando...</div>
+      <h2 style="text-align: center; color: var(--primary)">
+        Diário de Classe
+      </h2>
+      <div id="statusLoader">Iniciando sistema...</div>
 
       <div class="stats">
         <span>Turma: <span id="nomeTurma">-</span></span>
@@ -135,18 +137,17 @@
 
       <div class="actions">
         <button class="btn btn-sync" onclick="sincronizarComGoogle()">
-          ☁️ Salvar Chamada
+          ☁️ Salvar Chamada na Nuvem
         </button>
         <button class="btn btn-pdf" onclick="exportarPDF()">
           📄 Gerar PDF da Chamada
         </button>
-
         <button
           id="btnImportar"
           class="btn btn-admin"
           onclick="document.getElementById('inputExcel').click()"
         >
-          📥 Importar Novo Excel (Admin)
+          📥 Importar Excel (Admin)
         </button>
         <input
           type="file"
@@ -158,42 +159,56 @@
     </div>
 
     <script>
+      // ATENÇÃO: Verifique se este link está correto!
       const SCRIPT_URL =
-        "https://script.google.com/macros/s/AKfycbxverCBNjQUk3AAvAFD2iTxkBbh4tx3wE0cFKEvCSCBYZoeVlDg16hWrn50ErIukFK5lg/exec";
+        "https://script.google.com/macros/s/AKfycbzKTF6hKO-E_P6K2bcJv1AvIXa3CLuomXZRClx3LTTqmwFtSAtbvwDfV52lJkJ9MaT0bg/exec";
+
       let dadosAlunos = JSON.parse(localStorage.getItem("diario_cloud")) || [];
       let turmaAtual = "";
 
-      // Mostra o botão de importar apenas se o link terminar com ?admin=1
+      // 1. LÓGICA DE VISÃO ADMIN
       if (window.location.search.includes("admin=1")) {
         document.getElementById("btnImportar").style.display = "block";
       }
 
-      async function carregarDaNuvem() {
-        document.getElementById("statusLoader").style.display = "block";
+      // 2. CARREGAR DADOS (A MÁGICA PARA O PROFESSOR)
+      async function inicializarApp() {
+        const loader = document.getElementById("statusLoader");
+        loader.innerText = "Buscando lista na nuvem...";
+
         try {
-          const res = await fetch(SCRIPT_URL);
-          const dados = await res.json();
-          if (dados && dados.length > 0) {
-            dadosAlunos = dados.map((a) => ({
+          // Tenta buscar do Google Sheets
+          const response = await fetch(SCRIPT_URL);
+          const dadosNuvem = await response.json();
+
+          if (dadosNuvem && dadosNuvem.length > 0) {
+            // Se achou no Google, atualiza a memória local
+            dadosAlunos = dadosNuvem.map((a) => ({
               nome: a.Nome,
               turma: a.Turma,
-              faltas: a.Faltas_Acumuladas,
               presente: false,
             }));
             localStorage.setItem("diario_cloud", JSON.stringify(dadosAlunos));
-            turmaAtual = dadosAlunos[0].turma;
-            renderizarTudo();
+            loader.innerText = "Lista atualizada via Nuvem!";
           }
         } catch (e) {
-          console.log("Usando dados locais");
-          if (dadosAlunos.length > 0) {
-            turmaAtual = dadosAlunos[0].turma;
-            renderizarTudo();
-          }
+          loader.innerText =
+            dadosAlunos.length > 0
+              ? "Modo Offline (Dados Locais)"
+              : "Erro: Sem internet e sem lista.";
         }
-        document.getElementById("statusLoader").style.display = "none";
+
+        if (dadosAlunos.length > 0) {
+          turmaAtual = dadosAlunos[0].turma;
+          renderizarTudo();
+        }
+
+        setTimeout(() => {
+          loader.style.display = "none";
+        }, 2000);
       }
 
+      // 3. IMPORTAR EXCEL (SÓ ADMIN USA)
       document
         .getElementById("inputExcel")
         .addEventListener("change", function (e) {
@@ -202,18 +217,23 @@
             const wb = XLSX.read(evt.target.result, { type: "binary" });
             const json = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
             dadosAlunos = json.map((item) => ({
-              nome: (item["Nome "] || item.Nome).toString().trim(),
-              turma: item.Turma.toString().trim(),
-              faltas: 0,
+              nome: (item["Nome "] || item.Nome || "Sem Nome")
+                .toString()
+                .trim(),
+              turma: (item.Turma || "Geral").toString().trim(),
               presente: false,
             }));
             localStorage.setItem("diario_cloud", JSON.stringify(dadosAlunos));
             turmaAtual = dadosAlunos[0].turma;
             renderizarTudo();
+            alert(
+              "Excel Importado! Clique em 'Salvar na Nuvem' para enviar aos professores.",
+            );
           };
           reader.readAsBinaryString(e.target.files[0]);
         });
 
+      // 4. RENDERIZAR TELA
       function renderizarTudo() {
         const tabContainer = document.getElementById("tabContainer");
         const corpo = document.getElementById("corpoTabela");
@@ -234,6 +254,7 @@
         corpo.innerHTML = "";
         const filtrados = dadosAlunos.filter((a) => a.turma === turmaAtual);
         let pres = 0;
+
         filtrados.forEach((aluno) => {
           if (aluno.presente) pres++;
           const tr = document.createElement("tr");
@@ -245,22 +266,25 @@
           };
           corpo.appendChild(tr);
         });
+
         document.getElementById("nomeTurma").innerText = turmaAtual;
         document.getElementById("txtTotal").innerText = filtrados.length;
         document.getElementById("txtPres").innerText = pres;
       }
 
+      // 5. SALVAR NO GOOGLE
       async function sincronizarComGoogle() {
         document.getElementById("statusLoader").style.display = "block";
+        document.getElementById("statusLoader").innerText = "Enviando dados...";
         try {
           await fetch(SCRIPT_URL, {
             method: "POST",
             mode: "no-cors",
             body: JSON.stringify(dadosAlunos),
           });
-          alert("Chamada salva!");
+          alert("Chamada enviada com sucesso!");
         } catch (e) {
-          alert("Erro ao salvar.");
+          alert("Erro ao conectar com a planilha.");
         }
         document.getElementById("statusLoader").style.display = "none";
       }
@@ -277,7 +301,7 @@
         doc.save(`Chamada_${turmaAtual}.pdf`);
       }
 
-      window.onload = carregarDaNuvem;
+      window.onload = inicializarApp;
     </script>
   </body>
 </html>
